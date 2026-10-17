@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ETL no Galpão com Robôs</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;800&family=Nunito:wght@400;700&display=swap">
+<style>
+:root{--bg:#e8f1ff;--card:#fff;--ink:#1d2147;--mute:#5b6190;--belt:#2b2f5c;--line:#cdd8f5;--zone:#f4f8ff;--c1:#ff6b6b;--c2:#4d9bff;--c3:#2ecc8f;--accent:#7a5cff;--warn:#ff4d6d;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--bg:#14172e;--card:#1e2245;--ink:#eef0ff;--mute:#a4a9d6;--belt:#0c0e22;--line:#343a73;--zone:#191d3b}}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#14172e;--card:#1e2245;--ink:#eef0ff;--mute:#a4a9d6;--belt:#0c0e22;--line:#343a73;--zone:#191d3b}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Nunito,system-ui,sans-serif}
+main{max-width:1000px;margin:0 auto;padding:20px 16px 40px}
+h1{font:800 clamp(28px,6vw,44px)/1.05 "Baloo 2",system-ui,sans-serif;margin:0 0 6px}
+.sub{color:var(--mute);margin:0 0 14px;max-width:62ch}
+.stats{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.stat{background:var(--card);border:2px solid var(--line);border-radius:14px;padding:6px 14px;font-weight:700}
+.stat b{font:800 22px "Baloo 2",sans-serif;margin-right:6px}
+canvas{width:100%;height:auto;display:block;background:var(--card);border:2px solid var(--line);border-radius:20px}
+.btns{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}
+button{font:700 15px Nunito,sans-serif;color:var(--ink);background:var(--card);border:2px solid var(--line);border-radius:12px;padding:10px 14px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+button.go{background:var(--accent);border-color:var(--accent);color:#fff}
+button.on{background:var(--ink);border-color:var(--ink);color:var(--card)}
+.card{background:var(--card);border:2px solid var(--line);border-radius:20px;padding:16px 18px}
+.card h2{font:800 20px/1.25 "Baloo 2",sans-serif;margin:0 0 8px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:640px){.two{grid-template-columns:1fr}}
+.two h3{margin:0 0 4px;font-size:15px;color:var(--mute)}
+.two p{margin:0 0 8px}
+pre{margin:0;padding:10px 12px;background:var(--bg);border-radius:10px;overflow-x:auto;font-size:13px;line-height:1.5}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+</style>
+</head>
+<body>
+<main>
+<h1>ETL no Galpão</h1>
+<p class="sub">Os robôs recebem o pacote do caminhão e mandam pra esteira de cada região. Se algum passar pela esteira errada, o código de rastreio não bate e ele volta. No fim, a gaiola vai pra doca do caminhão certo.</p>
+<div class="stats">
+<div class="stat"><b id="sB">0</b>caixas expedidas</div>
+<div class="stat"><b id="sT">0</b>caminhões despachados</div>
+<div class="stat"><b id="sF">0</b>erros corrigidos</div>
+</div>
+<canvas id="cv" width="1000" height="400" aria-label="Animação de um galpão com robôs, esteiras por região, gaiolas e docas"></canvas>
+<div class="btns">
+<button class="go" id="bCall">🚚 Chamar caminhão</button>
+<button id="bAuto">♻️ Modo automático</button>
+<button id="bHurry">🏃 Modo pressa</button>
+<button id="bSp">⏩ Velocidade 1x</button>
+</div>
+<div class="card" aria-live="polite">
+<div class="tabs" id="tabs"></div>
+<h2 id="cT"></h2>
+<div class="two">
+<div><h3>No galpão</h3><p id="cG"></p></div>
+<div><h3>No código</h3><p id="cC"></p><pre id="cK"></pre></div>
+</div>
+</div>
+</main>
+<script>
+const cv=document.getElementById('cv'),g=cv.getContext('2d');
+const W=1000,LY=[105,205,305],TY=205,BX=320,SC=480,BE=640,CX=720,DX=835,REG=['SP','RJ','MG'];
+const ST=[
+{n:'Extract',s:'Recebimento',e:'🚚',
+ gal:'O caminhão chega e os robôs descarregam. Na pressa, o robô manda o pacote pra esteira que achou ser a certa, e às vezes erra.',
+ cod:'Você busca os dados na fonte e traz pra dentro do pipeline, sem mexer em nada.',
+ k:'raw = pd.read_csv("caminhao.csv")'},
+{n:'Transform',s:'Separação',e:'🔎',
+ gal:'No fim de cada esteira, o leitor confere se o código de rastreio bate com a região dela. Se não bate, o pacote volta e um robô leva pra esteira certa.',
+ cod:'Você valida cada registro e corrige o que não passou na regra.',
+ k:'df["regiao"] = df.codigo.str[:2]\nerros = df[df.regiao != df.esteira]\ndf.loc[erros.index, "esteira"] = erros.regiao'},
+{n:'Load',s:'Expedição',e:'📦',
+ gal:'Os robôs levam os pacotes de cada esteira pra uma gaiola. Quando a gaiola enche, outro robô leva até a doca do caminhão daquela região.',
+ cod:'Você grava os dados já tratados no destino, em lotes por região.',
+ k:'for reg, lote in df.groupby("regiao"):\n    lote.to_sql(f"entregas_{reg}", engine)'}
+];
+let P=[],truck=null,autoT=0,auto=false,speed=1,sel=0,seen={},err=.2,stats={b:0,t:0,f:0};
+const tA=[],tB=[],tC=[[],[],[]],tD=[];
+const cages=[0,1,2].map(()=>({c:[],sent:false,carried:false,x:CX,y:0}));
+const D=[0,1,2].map(()=>({s:'wait',c:[],off:0,t:0}));
+const RC={A:'#7a5cff',B:'#ff9f1c',C:'#12b5a2',D:'#ec4899'};
+const RB=[{r:'A',hx:215,hy:135},{r:'A',hx:215,hy:275},{r:'B',hx:300,hy:155},{r:'C',l:0,hx:668,hy:LY[0]+30},{r:'C',l:1,hx:668,hy:LY[1]+30},{r:'C',l:2,hx:668,hy:LY[2]+30},{r:'D',hx:780,hy:155},{r:'D',hx:780,hy:255}].map(o=>({...o,x:o.hx,y:o.hy,s:'idle',k:null,tx:0,ty:0}));
+const cvar=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function once(k,i){if(!seen[k]){seen[k]=1;show(i)}}
+function callTruck(){if(truck)return;seen={};truck={x:-200,s:'in',t:0,items:Array.from({length:6},()=>Math.random()*3|0)}}
+function spawn(type){const p={x:truck.x+128,y:TY,type,code:REG[type]+'-'+(100+(Math.random()*899|0)),s:'pick',belt:type,chk:false,t:0};P.push(p);tA.push(p)}
+const mv=(r,dt)=>{const dx=r.tx-r.x,dy=r.ty-r.y,d=Math.hypot(dx,dy),st=190*dt;if(d<=st){r.x=r.tx;r.y=r.ty;return 1}r.x+=dx/d*st;r.y+=dy/d*st;return 0};
+const busy=l=>P.some(q=>q.s==='belt'&&q.belt===l&&q.x<BX+40);
+function go(r){const k=r.k;
+ if(r.r==='A'){r.tx=k.x+24;r.ty=k.y}
+ if(r.r==='B'){r.tx=BX-18;r.ty=LY[k.belt]}
+ if(r.r==='C'){r.tx=BE+14;r.ty=LY[r.l]}
+ if(r.r==='D'){r.tx=CX+32;r.ty=LY[k.l]}
+ r.s='go'}
+function pick(r){const k=r.k;r.s='carry';
+ if(r.r==='A'){k.s='carried';k.belt=Math.random()<err?(k.type+1+(Math.random()*2|0))%3:k.type;r.tx=BX-18;r.ty=LY[k.belt]}
+ if(r.r==='B'){k.s='carried';r.tx=BX-18;r.ty=LY[k.type]}
+ if(r.r==='C'){k.s='carried';r.tx=CX;r.ty=LY[r.l]}
+ if(r.r==='D'){cages[k.l].carried=true;r.tx=DX-24;r.ty=LY[k.l]}}
+function drop(r){const k=r.k;
+ if(r.r==='A'||r.r==='B'){const l=r.r==='A'?k.belt:k.type;if(busy(l))return 0;
+  if(r.r==='B'){k.belt=k.type;stats.f++}
+  k.s='belt';k.x=BX;k.y=LY[l];k.chk=false}
+ if(r.r==='C'){k.dead=1;const c=cages[r.l];c.c.push(k.type);if(c.c.length>=4&&!c.sent){c.sent=true;tD.push({l:r.l})}}
+ if(r.r==='D'){const d=D[k.l];if(d.s!=='wait')return 0;d.c=cages[k.l].c.slice();Object.assign(cages[k.l],{c:[],sent:false,carried:false});d.s='out';stats.t++;stats.b+=d.c.length;once('L',2)}
+ return 1}
+function robots(dt){RB.forEach(r=>{
+ if(r.s==='idle'){const k=r.r==='A'?tA.shift():r.r==='B'?tB.shift():r.r==='C'?tC[r.l].shift():tD.shift();if(k){r.k=k;go(r)}}
+ else if(r.s==='go'){if(mv(r,dt))pick(r)}
+ else if(r.s==='carry'){mv(r,dt);
+  if(r.r==='D'){const c=cages[r.k.l];c.x=r.x;c.y=r.y-26}else{r.k.x=r.x;r.k.y=r.y-24}
+  if(r.tx===r.x&&r.ty===r.y&&drop(r)){if(r.r==='D'){const c=cages[r.k.l];c.x=CX;}r.s='ret';r.tx=r.hx;r.ty=r.hy;r.k=null}}
+ else if(r.s==='ret'){if(mv(r,dt))r.s='idle'}})}
+function step(dt){
+ if(truck){
+  if(truck.s==='in'){truck.x+=260*dt;if(truck.x>=55){truck.x=55;truck.s='unload';truck.t=.5;once('E',0)}}
+  else if(truck.s==='unload'){truck.t-=dt;
+   if(truck.t<=0&&truck.items.length&&tA.length<2){spawn(truck.items.pop());truck.t=.8}
+   if(!truck.items.length&&truck.t<=0)truck.s='out'}
+  else{truck.x-=300*dt;if(truck.x<-220){truck=null;autoT=1.2}}
+ }else if(auto){autoT-=dt;if(autoT<=0)callTruck()}
+ robots(dt);
+ P.forEach(p=>{
+  if(p.s==='belt'){
+   const ah=P.some(q=>q!==p&&q.belt===p.belt&&(q.s==='belt'||q.s==='scan'||q.s==='cagewait')&&q.x>p.x&&q.x-p.x<32);
+   if(!ah)p.x+=90*dt;
+   if(!p.chk&&p.x>=SC){p.chk=true;p.s='scan';p.t=.5;p.x=SC}
+   else if(p.x>=BE){p.x=BE;p.s='cagewait';tC[p.belt].push(p)}}
+  else if(p.s==='scan'){p.t-=dt;if(p.t<=0){
+   if(p.belt===p.type)p.s='belt';
+   else{p.s='back';show(1,'Código '+p.code+' não bate com a esteira '+REG[p.belt]+'. O pacote volta pro começo.')}}}
+  else if(p.s==='back'){p.x-=150*dt;if(p.x<=BX){p.x=BX;p.s='fix';tB.push(p)}}});
+ P=P.filter(p=>!p.dead);
+ D.forEach(k=>{
+  if(k.s==='out'){k.off+=500*dt;if(k.off>=420){k.s='gap';k.t=.5}}
+  else if(k.s==='gap'){k.t-=dt;if(k.t<=0){k.s='in';k.c=[]}}
+  else if(k.s==='in'){k.off-=500*dt;if(k.off<=0){k.off=0;k.s='wait'}}});
+ sB.textContent=stats.b;sT.textContent=stats.t;sF.textContent=stats.f}
+function rr(x,y,w,h,r){g.beginPath();g.roundRect(x,y,w,h,r)}
+function drawTruck(x0,y,col,dir,cargo,cols,cap,C){
+ g.fillStyle=col;rr(x0,y-32,120,64,8);g.fill();
+ const cx=dir>0?x0+120:x0-34;g.fillStyle=C.ink;rr(cx,y-14,34,46,8);g.fill();
+ g.fillStyle=C.card;rr(dir>0?cx+16:cx+4,y-8,14,14,3);g.fill();
+ g.fillStyle=C.ink;[22,98].forEach(o=>{g.beginPath();g.arc(x0+o,y+33,9,0,7);g.fill()});
+ for(let i=0;i<cap;i++){const px=x0+14+(i%cols)*34,py=y-26+(i/cols|0)*30;
+  g.fillStyle='rgba(255,255,255,.25)';rr(px,py,26,24,5);g.fill();
+  if(cargo[i]!=null){g.fillStyle=C.cols[cargo[i]];rr(px,py,26,24,5);g.fill();g.fillStyle='rgba(255,255,255,.75)';g.fillRect(px+11,py,4,24)}}}
+function bot(r,C){const x=r.x,y=r.y;
+ g.strokeStyle=RC[r.r];g.lineWidth=2;g.beginPath();g.moveTo(x,y-9);g.lineTo(x,y-15);g.stroke();g.fillStyle=RC[r.r];g.beginPath();g.arc(x,y-16,3,0,7);g.fill();
+ rr(x-13,y-9,26,20,7);g.fill();g.fillStyle='#fff';[-5,5].forEach(o=>{g.beginPath();g.arc(x+o,y-2,3.6,0,7);g.fill()});
+ g.fillStyle=C.ink;[-5,5].forEach(o=>{g.beginPath();g.arc(x+o,y-1,1.6,0,7);g.fill()});
+ g.fillStyle=C.ink;rr(x-11,y+10,22,5,2.5);g.fill()}
+function pkg(p,C){const x=p.x-13,y=p.y-13;
+ g.fillStyle=C.cols[p.type];rr(x,y,26,26,6);g.fill();g.fillStyle='rgba(255,255,255,.75)';g.fillRect(p.x-2,y,4,26);
+ g.textAlign='center';g.font='700 11px Nunito,sans-serif';g.fillStyle=p.s==='back'||p.s==='fix'?cvar('--warn'):C.ink;g.fillText(p.code,p.x,p.y+26);
+ if(p.s==='back'||p.s==='fix'){g.font='16px serif';g.fillText('⚠️',p.x,y-5)}}
+function draw(){
+ const C={cols:[cvar('--c1'),cvar('--c2'),cvar('--c3')],ink:cvar('--ink'),card:cvar('--card'),belt:cvar('--belt'),line:cvar('--line'),zone:cvar('--zone'),mute:cvar('--mute'),acc:cvar('--accent')};
+ g.clearRect(0,0,W,400);
+ [[8,285],[296,364],[664,328]].forEach((z,i)=>{g.fillStyle=C.zone;g.strokeStyle=sel===i?C.acc:C.line;g.lineWidth=sel===i?4:2;rr(z[0],8,z[1],346,18);g.fill();g.stroke();
+  g.textAlign='left';g.fillStyle=C.ink;g.font='800 22px "Baloo 2",sans-serif';g.fillText(ST[i].n,z[0]+16,36);
+  g.fillStyle=C.mute;g.font='700 13px Nunito,sans-serif';g.fillText(ST[i].s,z[0]+16,54)});
+ g.lineCap='round';
+ const path=()=>{g.beginPath();LY.forEach(y=>{g.moveTo(BX-8,y);g.lineTo(BE+10,y)})};
+ g.strokeStyle=C.belt;g.lineWidth=26;path();g.stroke();
+ g.strokeStyle=C.line;g.lineWidth=3;g.setLineDash([10,14]);g.lineDashOffset=-performance.now()/40*speed;path();g.stroke();g.setLineDash([]);
+ LY.forEach((y,i)=>{
+  g.strokeStyle=C.ink;g.lineWidth=4;g.beginPath();g.moveTo(SC-18,y+22);g.lineTo(SC-18,y-30);g.lineTo(SC+18,y-30);g.lineTo(SC+18,y+22);g.stroke();
+  g.strokeStyle=cvar('--warn');g.lineWidth=2;g.beginPath();g.moveTo(SC,y-28);g.lineTo(SC,y+20);g.stroke();
+  g.fillStyle=C.cols[i];rr(BX-10,y-46,86,18,9);g.fill();g.fillStyle='#fff';g.font='800 12px Nunito,sans-serif';g.textAlign='center';g.fillText('Esteira '+REG[i],BX+33,y-33);
+  const c=cages[i],cx=c.carried?c.x:CX,cy=c.carried?c.y:y;
+  g.strokeStyle=C.ink;g.lineWidth=3;rr(cx-21,cy-23,42,46,4);g.stroke();g.lineWidth=1;g.beginPath();g.moveTo(cx,cy-23);g.lineTo(cx,cy+23);g.moveTo(cx-21,cy);g.lineTo(cx+21,cy);g.stroke();
+  c.c.forEach((t,j)=>{g.fillStyle=C.cols[t];rr(cx-17+(j%2)*18,cy-19+(j/2|0)*20,15,15,3);g.fill()});
+  g.fillStyle=C.mute;g.font='700 11px Nunito,sans-serif';g.fillText('Gaiola '+REG[i],CX,y+38);
+  g.fillStyle=C.cols[i];rr(DX,y-52,86,18,9);g.fill();g.fillStyle='#fff';g.font='800 12px Nunito,sans-serif';g.fillText('Doca '+REG[i],DX+43,y-39);
+  drawTruck(DX+D[i].off,y,C.cols[i],1,D[i].c,2,4,C)});
+ if(truck)drawTruck(truck.x,TY,cvar('--accent'),-1,truck.items,3,6,C);
+ P.forEach(p=>pkg(p,C));
+ RB.forEach(r=>bot(r,C));
+ RB.forEach(r=>{if(r.s==='carry'&&r.r!=='D')pkg(r.k,C)});
+ g.textAlign='left';g.font='700 12px Nunito,sans-serif';
+ [['A','Robô recebe'],['B','Robô corrige'],['C','Robô leva à gaiola'],['D','Robô leva à doca']].forEach((l,i)=>{g.fillStyle=RC[l[0]];rr(16+i*150,372,14,14,4);g.fill();g.fillStyle=C.ink;g.fillText(l[1],36+i*150,384)})}
+let last=performance.now();
+function loop(t){const dt=Math.min(.05,(t-last)/1000)*speed;last=t;step(dt);draw();requestAnimationFrame(loop)}
+function show(i,msg){sel=i;const s=ST[i];
+ cT.textContent=msg||(s.e+' '+s.n+' · '+s.s);cG.textContent=s.gal;cC.textContent=s.cod;cK.textContent=s.k;
+ [...tabs.children].forEach((b,j)=>b.classList.toggle('on',j===i))}
+ST.forEach((s,i)=>{const b=document.createElement('button');b.textContent=s.e+' '+s.n;b.onclick=()=>show(i);tabs.appendChild(b)});
+bCall.onclick=callTruck;
+bAuto.onclick=()=>{auto=!auto;bAuto.classList.toggle('on',auto);if(auto&&!truck)callTruck()};
+bHurry.onclick=()=>{err=err>.3?.2:.6;bHurry.classList.toggle('on',err>.3)};
+bSp.onclick=()=>{speed=speed===1?2:1;bSp.textContent='⏩ Velocidade '+speed+'x'};
+show(0);requestAnimationFrame(loop);
+</script>
+</body>
+</html>
